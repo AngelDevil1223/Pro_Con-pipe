@@ -4,18 +4,18 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <stdbool.h>
 
 unsigned char char_with_parity(unsigned char);
-void bit_writter(unsigned char* arr, FILE* fp);
-void framing(int fd[2], char fname[]);
-void error_maker(int frame_number,unsigned char arr[], int len);
-void deframing(int fd[2] ,FILE* outfptr);
-int error_checker(int buffer_number,unsigned char arr[], int len);
-int producer(int fd[2] ,char *filename);
-int consumer(int fd[2], char *filename);
-
+void bit_writter(unsigned char* , FILE* );
+void framing(int[2], char []);
+void error_maker(int ,unsigned char[], int);
+void deframing(int[2] ,FILE*);
+int error_checker(int ,unsigned char[], int);
+int producer(int[2] ,char *);
+int consumer(int[2], char *);
 
 int producer(int fd[2] ,char *filename) {
     framing(fd,filename);
@@ -23,8 +23,6 @@ int producer(int fd[2] ,char *filename) {
 }
 
 unsigned char char_with_parity(unsigned char chr) {
-    // routines to handle tasks such as converting a character into a binary bit pattern,
-    // and add parity bit
     int ones=0;
     char temp = chr;
     for (int i = 1; temp; temp=temp/2, i++) {
@@ -39,7 +37,7 @@ void framing(int fd[2],char fname[]) {
     int buffer_len;
     FILE *infile, *outfile;
     infile = fopen(fname, "rb");
-
+    outfile = fopen("output.binf", "wb");
 
     if(infile == NULL)
         return;
@@ -47,14 +45,15 @@ void framing(int fd[2],char fname[]) {
     int frame_number = 1;
     while((buffer_len = fread(buffer, 1, 64, infile))){
         for(int i = 0 ; i < buffer_len; i++){
+            buffer[i] = toupper(buffer[i]);
             buffer[i] = char_with_parity(buffer[i]);
         }
         char control_character[4];
         char len_char = buffer_len;
         error_maker(frame_number,buffer, buffer_len);
         snprintf(control_character, 4, "\22\22%c", len_char);
-        /*printf("buffer len is : %d and len_char is %c\n", buffer_len, len_char);*/
-        /*printf("And control_character is : %s\n", control_character);*/
+        fwrite(control_character, sizeof(char) * 3, 1, outfile);
+        fwrite(buffer, sizeof(char), buffer_len, outfile);
         close(fd[0]);
         write(fd[1], control_character, 3);
         close(fd[0]);
@@ -62,18 +61,18 @@ void framing(int fd[2],char fname[]) {
     }
 
     fclose(infile);
+    fclose(outfile);
 }
 
 void error_maker(int frame_number,unsigned char arr[], int len) {
     int no_of_errors;
     srand(time(0));
 
-    no_of_errors = rand() % 3; // limiting maximum number of errors to two in every 64 bytes
+    no_of_errors = rand() % 3;
     for (int i=0; i < no_of_errors; i++){
         int byte_number = rand() % len;
         int bit_number = rand() % 8;
-        // bit flips
-        arr[byte_number] ^= 1 << bit_number; // making sure that error terms don't mess with parity bit
+        arr[byte_number] ^= 1 << bit_number;
         
         fprintf(stderr,"Error Creation information : %dth frame %d byte and %dth bit\n", frame_number, byte_number / 8, byte_number % 8);
     }
@@ -83,13 +82,9 @@ void error_maker(int frame_number,unsigned char arr[], int len) {
 int consumer(int fd[2], char *filename){
     FILE *outfptr;
     outfptr = fopen(filename, "wt");
-
     deframing(fd,outfptr);
-
     fclose(outfptr);
-
     return 0;
-    
 }
 
 int error_checker(int buffer_number,unsigned char arr[], int len){
@@ -145,25 +140,22 @@ void deframing(int fd[2] ,FILE* outfptr){
 
 int main(void){
     int fd[2];
-    char *input_filename = "filename.inpf";
-    char *output_filename = "filename.outf";
+    char *input_filename = "input.inpf";
+    char *output_filename = "output.outf";
     pid_t producer_process, consumer_process;
     if(pipe(fd) < 0 ){
         fprintf(stderr, "Error in creating pipes!\n");
     }
     producer_process = fork();
     if(producer_process == 0){
-        // we are in child process
         producer(fd, input_filename);
         exit(0);
     }
-    // in parent process
     consumer_process = fork();
     if(consumer_process == 0){
         consumer(fd, output_filename);
         exit(0);
     }
-    // in parent process
     wait(0);
     wait(0);
     return 0;
